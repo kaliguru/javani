@@ -1,55 +1,49 @@
+// services/notification.js
 const admin = require('firebase-admin');
-const firebaseConfig = require('../config/firebase-config'); // Adjust path as needed
 const User = require('../Models/User/User');
 const Distributer = require('../Models/Distributer/Distributer');
-// Initialize Firebase Admin if not already initialized
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(firebaseConfig),
-    });
+
+// ensure admin is initialized in your app bootstrap, not here repeatedly.
+
+async function rawSendNotification(message) {
+  // message should be { notification: {title, body}, token }
+  return admin.messaging().send(message);
 }
 
 /**
- * Sends a push notification using Firebase Cloud Messaging.
- * @param {Object} params
- * @param {string} params.title - Notification title
- * @param {string} params.body - Notification body
- * @param {string} params.userType - 'User' or 'Distributer'
- * @param {string} params.userId - ID of the user or distributer
- * @returns {Promise<Object>} - FCM response
+ * Promise wrapper that rejects after `ms` milliseconds.
  */
-async function sendNotification({ title, body, userType, userId }) {
-    if (!userType || !userId) {
-        throw new Error('userType and userId are required');
-    }
+function withTimeout(promise, ms = 5000) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('FCM timeout')), ms))
+  ]);
+}
 
-    let userDoc;
-    if (userType === 'User') {
-        userDoc = await User.findById(userId).lean();
-    } else if (userType === 'Distributer') {
-        userDoc = await Distributer.findById(userId).lean();
-    } else {
-        throw new Error('Invalid userType. Must be "User" or "Distributer"');
-    }
+/**
+ * Safe send: looks up token and sends; returns { ok, reason } and never throws.
+ */
+async function sendNotification({ title, body, userType, userId, timeoutMs = 5000 }) {
+  try {
+    if (!userType || !userId) return { ok: false, reason: 'missing userType/userId' };
 
-    if (!userDoc || !userDoc.fcmToken) {
-        throw new Error('FCM token not found for the specified user');
-    }
+    const doc = userType === 'User'
+      ? await User.findById(userId).lean()
+      : await Distributer.findById(userId).lean();
+
+    if (!doc) return { ok: false, reason: 'user not found' };
+    if (!doc.fcmToken) return { ok: false, reason: 'no fcmToken' };
 
     const message = {
-        notification: {
-            title,
-            body,
-        },
-        token: userDoc.fcmToken,
+      notification: { title, body },
+      token: doc.fcmToken,
     };
 
-    try {
-        const response = await admin.messaging().send(message);
-        return { success: true, response };
-    } catch (error) {
-        return { success: false, error: error.message };
-    }
+    const resp = await withTimeout(rawSendNotification(message), timeoutMs);
+    return { ok: true, response: resp };
+  } catch (err) {
+    return { ok: false, reason: err.message || err };
+  }
 }
 
 module.exports = { sendNotification };

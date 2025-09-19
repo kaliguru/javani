@@ -5,6 +5,8 @@ const Distributer = require('../../Models/Distributer/Distributer');
 const auth = require('../../Middleware/auth'); 
 const Transaction = require('../../Models/Transcations/Transcations');
 const mongoose = require('mongoose');
+const { sendNotification } = require('../../services/notification');
+
 async function generateOrderId() {
 
   const lastOrder = await Order.findOne({ orderId: { $regex: /^JVANI-\d+$/ } })
@@ -65,7 +67,7 @@ router.post('/', auth, async (req, res) => {
       return res.status(404).json({ message: 'Distributer not found' });
     }
 
-    const assignedUserId = distributer.addedBy; // 👈 assign order to the user who added distributer
+    const assignedUserId = distributer.addedBy; // assign to who added the distributer
 
     // 2️⃣ Generate orderId
     const orderId = await generateOrderId();
@@ -81,10 +83,33 @@ router.post('/', auth, async (req, res) => {
       paymentMode,
       cod: String(paymentMode).toLowerCase() === 'cod',
       assignedTo: assignedUserId,
-      status: 'processing', // optional
+      status: 'processing',
     });
 
     const savedOrder = await newOrder.save();
+
+    // Notify distributer (non-blocking)
+   // inside your router.post('/', ...) after savedOrder
+(async () => {
+  try {
+    console.log('Attempting notification to distributer:', String(savedOrder.distributerId));
+    const result = await require('../../services/notification').sendNotification({
+      title: 'New Order Placed',
+      body: `Order ${orderId} created for you. Total ₹${total}.`,
+      userType: 'Distributer',
+      userId: String(savedOrder.distributerId),
+      timeoutMs: 4000, // fail fast
+    });
+    if (!result.ok) {
+      console.warn('Notification not sent:', result.reason);
+    } else {
+      console.log('Notification sent:', result.response);
+    }
+  } catch (notifErr) {
+    console.error('Notification error (create order):', notifErr.message || notifErr);
+  }
+})();
+
 
     res.status(201).json({
       message: 'Order placed and assigned successfully',

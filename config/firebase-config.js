@@ -1,17 +1,19 @@
-// config/firebase-config.js
-const admin = require('firebase-admin');
-const path = require('path');
+const admin = require("firebase-admin");
+const serviceAccount = require("./service-account.json");
 
-// Load service account JSON
-const serviceAccount = require(path.join(__dirname, 'service-account.json'));
+const firebaseConfig = {
+  apiKey: "AIzaSyB14MorOfKmXkhSS3u326K_36O8kwsTyMA",
+  authDomain: "jvani-4fa7c.firebaseapp.com",
+  projectId: "jvani-4fa7c",
+  storageBucket: "jvani-4fa7c.firebasestorage.app",
+  messagingSenderId: "1038499204109",
+  appId: "1:1038499204109:web:e29055e69246583113d944",
+  measurementId: "G-1ETJN912B6"
+};
 
-// Initialize Admin SDK (idempotent safe)
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    // use the correct storage bucket host (not the long web-host)
-    storageBucket: 'jvani-4fa7c.appspot.com'
-  });
-}
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: firebaseConfig.storageBucket
+});
 
 module.exports = admin;
