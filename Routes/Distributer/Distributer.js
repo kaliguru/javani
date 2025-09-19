@@ -209,5 +209,39 @@ router.get('/by-addedby', auth, async (req, res) => {
     res.status(500).json({ message: 'Server Error', error: error.message });
   }
 });
+// PATCH /fcm
+// Update FCM token for the logged-in distributer
+router.patch('/fcm', auth, async (req, res) => {
+  try {
+    const distributerId = req.user?.distributerId || req.user?.userId;
+    const { fcmToken } = req.body;
+
+    if (!distributerId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+    if (!fcmToken || typeof fcmToken !== 'string') {
+      return res.status(400).json({ message: 'fcmToken is required' });
+    }
+
+    const distributer = await Distributer.findByIdAndUpdate(
+      distributerId,
+      { $set: { fcmToken } },
+      { new: true }
+    ).select('-otp -__v');
+
+    if (!distributer) {
+      return res.status(404).json({ message: 'Distributer not found' });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: 'FCM token updated',
+      fcmToken: distributer.fcmToken,
+    });
+  } catch (err) {
+    console.error('PATCH /fcm error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
 
 module.exports = router;
