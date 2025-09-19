@@ -1,2 +1,11 @@
+# Ignore service account credentials
+config/service-account.json
+
+# Ignore environment variables
+.env
+
+# Ignore node_modules
+node_modules/
 node_modules/
 .env
+config/service-account.json

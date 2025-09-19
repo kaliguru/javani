@@ -1,14 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
+
 const Order = require('../../Models/Orders/Order');
 const Distributer = require('../../Models/Distributer/Distributer');
-const auth = require('../../Middleware/auth'); 
+const User = require('../../Models/User/User'); // used for optional notifications to assigned user
 const Transaction = require('../../Models/Transcations/Transcations');
-const mongoose = require('mongoose');
+const auth = require('../../Middleware/auth');
+
 const { sendNotification } = require('../../services/notification');
 
 async function generateOrderId() {
-
   const lastOrder = await Order.findOne({ orderId: { $regex: /^JVANI-\d+$/ } })
     .sort({ orderId: -1 })
     .lean();
@@ -16,38 +18,31 @@ async function generateOrderId() {
   let next = 1;
   if (lastOrder?.orderId) {
     const match = lastOrder.orderId.match(/^JVANI-(\d+)$/);
-    if (match) {
-      next = parseInt(match[1]) + 1;
-    }
+    if (match) next = parseInt(match[1]) + 1;
   }
 
   return `JVANI-${String(next).padStart(2, '0')}`;
 }
+
 function generateTransactionId(paymentMode) {
   const randomPart = Math.floor(1000 + Math.random() * 9000); // 4 digit random number
   const ts = Date.now().toString().slice(-4); // last 4 digits of timestamp
   const code = `${randomPart}${ts}`;
 
   switch (String(paymentMode).toLowerCase()) {
-    case 'upi':
-      return `UPI${code}`;
-    case 'cheque':
-      return `CHQ${code}`;
-    case 'bank':
-      return `BNK${code}`;
-    case 'cash':
-      return `CSH${code}`;
-    default:
-      return `TXN${code}`;
+    case 'upi': return `UPI${code}`;
+    case 'cheque': return `CHQ${code}`;
+    case 'bank': return `BNK${code}`;
+    case 'cash': return `CSH${code}`;
+    default: return `TXN${code}`;
   }
 }
 
-/**
- * Helper: allowed status values (must match schema enum)
- */
 const ALLOWED_STATUS = ['pending', 'processing', 'completed', 'cancelled'];
 
-// 📦 Create new order
+/* ============================
+   CREATE ORDER
+   ============================ */
 router.post('/', auth, async (req, res) => {
   try {
     console.log('Creating order:', req.body);
@@ -61,18 +56,16 @@ router.post('/', auth, async (req, res) => {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    // 1️⃣ Fetch distributer to get addedBy
+    // Fetch distributer
     const distributer = await Distributer.findById(req.user.distributerId);
-    if (!distributer) {
-      return res.status(404).json({ message: 'Distributer not found' });
-    }
+    if (!distributer) return res.status(404).json({ message: 'Distributer not found' });
 
-    const assignedUserId = distributer.addedBy; // assign to who added the distributer
+    const assignedUserId = distributer.addedBy || null;
 
-    // 2️⃣ Generate orderId
+    // Generate orderId
     const orderId = await generateOrderId();
 
-    // 3️⃣ Create order
+    // Create order
     const newOrder = new Order({
       orderId,
       distributerId: req.user.distributerId,
@@ -89,65 +82,71 @@ router.post('/', auth, async (req, res) => {
     const savedOrder = await newOrder.save();
 
     // Notify distributer (non-blocking)
-   // inside your router.post('/', ...) after savedOrder
-(async () => {
-  try {
-    console.log('Attempting notification to distributer:', String(savedOrder.distributerId));
-    const result = await require('../../services/notification').sendNotification({
-      title: 'New Order Placed',
-      body: `Order ${orderId} created for you. Total ₹${total}.`,
-      userType: 'Distributer',
-      userId: String(savedOrder.distributerId),
-      timeoutMs: 4000, // fail fast
-    });
-    if (!result.ok) {
-      console.warn('Notification not sent:', result.reason);
-    } else {
-      console.log('Notification sent:', result.response);
+    (async () => {
+      try {
+        const result = await sendNotification({
+          title: 'New Order Placed',
+          body: `Order ${orderId} created for you. Total ₹${total}.`,
+          userType: 'Distributer',
+          userId: String(savedOrder.distributerId),
+          timeoutMs: 4000
+        });
+        if (!result.ok) console.warn('Notification not sent (distributer, create):', result.reason);
+        else console.log('Notification sent (distributer, create):', result.response);
+      } catch (e) {
+        console.error('Notification error (distributer, create):', e.message || e);
+      }
+    })();
+
+    // Notify assigned user (if present) that they have a new order
+    if (assignedUserId) {
+      (async () => {
+        try {
+          const result = await sendNotification({
+            title: 'New Order Assigned',
+            body: `You have been assigned order ${orderId} (₹${total}).`,
+            userType: 'User',
+            userId: String(assignedUserId),
+            timeoutMs: 4000
+          });
+          if (!result.ok) console.warn('Notification not sent (user, create):', result.reason);
+          else console.log('Notification sent (user, create):', result.response);
+        } catch (e) {
+          console.error('Notification error (user, create):', e.message || e);
+        }
+      })();
     }
-  } catch (notifErr) {
-    console.error('Notification error (create order):', notifErr.message || notifErr);
-  }
-})();
 
-
-    res.status(201).json({
-      message: 'Order placed and assigned successfully',
-      order: savedOrder,
-    });
+    return res.status(201).json({ message: 'Order placed and assigned successfully', order: savedOrder });
   } catch (err) {
     console.error('Error creating order:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
-/**
- * GET /by-distributer/:distributerId
- * Fetch orders for a specific distributer (admin/owner can call).
- * If you want current distributer to fetch their own orders, pass req.user.distributerId instead.
- */
+
+/* ============================
+   GET by distributer
+   ============================ */
 router.get('/by-distributer/:distributerId', auth, async (req, res) => {
   try {
     const { distributerId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(distributerId)) {
-      return res.status(400).json({ message: 'Invalid distributerId' });
-    }
+    if (!mongoose.Types.ObjectId.isValid(distributerId)) return res.status(400).json({ message: 'Invalid distributerId' });
 
     const orders = await Order.find({ distributerId })
-      .populate('distributer', 'fullname phone distributerId')
-      .populate('assignedTo', 'name email') // adjust fields to your User model
+      .populate('distributerId', 'fullname phone distributerId')
+      .populate('assignedTo', 'fullname email')
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ ok: true, count: orders.length, orders });
+    return res.status(200).json({ ok: true, count: orders.length, orders });
   } catch (err) {
     console.error('GET /by-distributer error:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
-/**
- * GET /my-distributer-orders
- * If the caller is a distributer, get orders for their distributerId (from token).
- */
+/* ============================
+   GET my distributer orders
+   ============================ */
 router.get('/my-distributer-orders', auth, async (req, res) => {
   try {
     const distributerId = req.user?.distributerId;
@@ -157,62 +156,55 @@ router.get('/my-distributer-orders', auth, async (req, res) => {
       .populate('assignedTo', 'fullname phoneNumber')
       .sort({ createdAt: -1 });
 
-    res.status(200).json( orders );
+    return res.status(200).json(orders);
   } catch (err) {
     console.error('GET /my-distributer-orders error:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
-/**
- * GET /assigned-to-me
- * Get orders assigned to the logged-in user
- */
+/* ============================
+   GET assigned-to-me
+   ============================ */
 router.get('/assigned-to-me', auth, async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
     const orders = await Order.find({ assignedTo: userId })
-      .populate('distributerId', 'fullname phone distributerId') // correct path
+      .populate('distributerId', 'fullname phone distributerId')
       .sort({ createdAt: -1 });
 
-    res.status(200).json( orders );
+    return res.status(200).json(orders);
   } catch (err) {
     console.error('GET /assigned-to-me error:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
-/**
- * GET /:id
- * Get single order by id (populated)
- */
+/* ============================
+   GET single order
+   ============================ */
 router.get('/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: 'Invalid order id' });
-    }
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid order id' });
 
     const order = await Order.findById(id)
-      .populate('distributer', 'fullname phone distributerId')
-      .populate('assignedTo', 'name email');
+      .populate('distributerId', 'fullname phone distributerId')
+      .populate('assignedTo', 'fullname email');
 
     if (!order) return res.status(404).json({ message: 'Order not found' });
-    res.status(200).json({ ok: true, order });
+    return res.status(200).json({ ok: true, order });
   } catch (err) {
     console.error('GET /:id error:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
-/**
- * PATCH /:id/status
- * Update order status
- * Body: { status: 'processing' }
- */
-// PATCH /:id/status
+/* ============================
+   PATCH status
+   ============================ */
 router.patch('/:id/status', auth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -221,9 +213,7 @@ router.patch('/:id/status', auth, async (req, res) => {
     if (!status || !ALLOWED_STATUS.includes(status)) {
       return res.status(400).json({ message: `Invalid status. Allowed: ${ALLOWED_STATUS.join(', ')}` });
     }
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: 'Invalid order id' });
-    }
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid order id' });
 
     const order = await Order.findById(id);
     if (!order) return res.status(404).json({ message: 'Order not found' });
@@ -232,22 +222,53 @@ router.patch('/:id/status', auth, async (req, res) => {
     await order.save();
 
     const populated = await Order.findById(id)
-      .populate('distributerId', 'fullname phone distributerId') // <-- use distributerId
+      .populate('distributerId', 'fullname phone distributerId')
       .populate('assignedTo', 'fullname email');
 
-    res.status(200).json({ ok: true, message: 'Status updated', order: populated });
+    // Notify distributer about status change (non-blocking)
+    (async () => {
+      try {
+        const result = await sendNotification({
+          title: 'Order Status Updated',
+          body: `Order ${populated.orderId || populated.orderId} is now "${status}".`,
+          userType: 'Distributer',
+          userId: String(populated.distributerId),
+          timeoutMs: 4000
+        });
+        if (!result.ok) console.warn('Notification not sent (distributer, status):', result.reason);
+      } catch (e) {
+        console.error('Notification error (distributer, status):', e.message || e);
+      }
+    })();
+
+    // Notify assigned user about status change (non-blocking)
+    if (populated.assignedTo) {
+      (async () => {
+        try {
+          const result = await sendNotification({
+            title: 'Order Status Updated',
+            body: `Order ${populated.orderId || populated.orderId} status changed to "${status}".`,
+            userType: 'User',
+            userId: String(populated.assignedTo._id),
+            timeoutMs: 4000
+          });
+          if (!result.ok) console.warn('Notification not sent (user, status):', result.reason);
+        } catch (e) {
+          console.error('Notification error (user, status):', e.message || e);
+        }
+      })();
+    }
+
+    return res.status(200).json({ ok: true, message: 'Status updated', order: populated });
   } catch (err) {
     console.error('PATCH /:id/status error:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
-/**
- * PATCH /:id/payment
- * Update payment fields (mark paid, change paymentMode, attach transaction id)
- * Body example: { paid: true, paymentMode: "onlinepayment", transactionId: "TXN12345" }
- */
-// PATCH /:id/payment
+/* ============================
+   PATCH payment
+   ============================ */
 router.patch('/:id/payment', auth, async (req, res) => {
   const session = await Order.startSession();
   session.startTransaction();
@@ -299,15 +320,53 @@ router.patch('/:id/payment', auth, async (req, res) => {
       if (txnPaymentMode === 'cod') txnPaymentMode = 'cash';
       else if (txnPaymentMode === 'onlinepayment') txnPaymentMode = 'other';
 
-      const transactionDoc = new Transaction({
-        distributer: updatedOrder.distributerId,
-        transactionAddBy: req.user?.userId || updatedOrder.assignedTo || null,
-        type: 'credit',
-        amount: updatedOrder.total,
-        paymentMode: txnPaymentMode,
-      });
+     const transactionDoc = new Transaction({
+  distributer: updatedOrder.distributerId,
+  transactionAddBy: req.user?.userId || updatedOrder.assignedTo || null,
+  orderId: updatedOrder._id,          
+  type: 'credit',
+  amount: updatedOrder.total,
+  paymentMode: txnPaymentMode,
+});
 
-      createdTransaction = await transactionDoc.save({ session });
+createdTransaction = await transactionDoc.save({ session });
+
+// commit before reload
+await session.commitTransaction();
+session.endSession();
+
+      (async () => {
+        try {
+          const result = await sendNotification({
+            title: 'Payment Received',
+            body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
+            userType: 'Distributer',
+            userId: String(updatedOrder.distributerId),
+            timeoutMs: 4000
+          });
+          if (!result.ok) console.warn('Notification not sent (distributer, payment):', result.reason);
+        } catch (e) {
+          console.error('Notification error (distributer, payment):', e.message || e);
+        }
+      })();
+
+      // Notify assigned user about payment (non-blocking)
+      if (updatedOrder.assignedTo) {
+        (async () => {
+          try {
+            const result = await sendNotification({
+              title: 'Payment Received',
+              body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
+              userType: 'User',
+              userId: String(updatedOrder.assignedTo),
+              timeoutMs: 4000
+            });
+            if (!result.ok) console.warn('Notification not sent (user, payment):', result.reason);
+          } catch (e) {
+            console.error('Notification error (user, payment):', e.message || e);
+          }
+        })();
+      }
     }
 
     await session.commitTransaction();
@@ -331,12 +390,9 @@ router.patch('/:id/payment', auth, async (req, res) => {
   }
 });
 
-
-/**
- * PATCH /:id/reassign
- * Reassign order to another user (admin only ideally)
- * Body: { assignedTo: "<userId>" }
- */
+/* ============================
+   PATCH reassign
+   ============================ */
 router.patch('/:id/reassign', auth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -346,20 +402,32 @@ router.patch('/:id/reassign', auth, async (req, res) => {
       return res.status(400).json({ message: 'Invalid id(s)' });
     }
 
-    // optionally validate user exists:
-    // const userExists = await User.exists({ _id: assignedTo, active: true });
-    // if (!userExists) return res.status(404).json({ message: 'User to assign not found' });
-
     const order = await Order.findByIdAndUpdate(id, { $set: { assignedTo } }, { new: true })
-      .populate('distributer', 'fullname phone distributerId')
-      .populate('assignedTo', 'name email');
+      .populate('distributerId', 'fullname phone distributerId')
+      .populate('assignedTo', 'fullname email');
 
     if (!order) return res.status(404).json({ message: 'Order not found' });
 
-    res.status(200).json({ ok: true, message: 'Order reassigned', order });
+    // Notify new assignee
+    (async () => {
+      try {
+        const result = await sendNotification({
+          title: 'Order Reassigned to You',
+          body: `Order ${order.orderId} has been assigned to you.`,
+          userType: 'User',
+          userId: String(assignedTo),
+          timeoutMs: 4000
+        });
+        if (!result.ok) console.warn('Notification not sent (user, reassign):', result.reason);
+      } catch (e) {
+        console.error('Notification error (user, reassign):', e.message || e);
+      }
+    })();
+
+    return res.status(200).json({ ok: true, message: 'Order reassigned', order });
   } catch (err) {
     console.error('PATCH /:id/reassign error:', err);
-    res.status(500).json({ message: 'Server error' });
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
