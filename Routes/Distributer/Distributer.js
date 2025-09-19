@@ -243,5 +243,23 @@ router.patch('/fcm', auth, async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 });
+router.post('/logout', auth, async (req, res) => {
+  try {
+    const distributerId = req.user?.distributerId || req.user?.userId;
+    if (!distributerId) return res.status(401).json({ message: 'Unauthorized' });
 
+    const updated = await Distributer.findByIdAndUpdate(
+      distributerId,
+      { $unset: { fcmToken: '' } }, // remove the field
+      { new: true }
+    ).select('-otp -__v');
+
+    if (!updated) return res.status(404).json({ message: 'Distributer not found' });
+
+    return res.status(200).json({ ok: true, message: 'Logged out — FCM token removed' });
+  } catch (err) {
+    console.error('POST /logout error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
 module.exports = router;

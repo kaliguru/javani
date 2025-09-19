@@ -250,6 +250,24 @@ router.patch('/fcm', auth, async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 });
+router.post('/logout', auth, async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
+    const updated = await User.findByIdAndUpdate(
+      userId,
+      { $unset: { fcmToken: '' } }, // removes the field; or use { $set: { fcmToken: null } } if you prefer
+      { new: true }
+    ).select('-otp -__v');
+
+    if (!updated) return res.status(404).json({ message: 'User not found' });
+
+    return res.status(200).json({ ok: true, message: 'Logged out — FCM token removed' });
+  } catch (err) {
+    console.error('POST /logout error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
 module.exports = router;
 
