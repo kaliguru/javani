@@ -40,12 +40,14 @@ router.get('/my-transactions', auth, async (req, res) => {
     }
 
     const total = await Transaction.countDocuments(filters);
-    const transactions = await Transaction.find(filters)
-      .sort({ createdAt: -1 })
-      .skip((pageNum - 1) * lim)
-      .limit(lim)
-      .populate('distributer', 'fullname phone distributerId')
-      .populate('transactionAddBy', 'fullname email');
+   const transactions = await Transaction.find(filters)
+  .sort({ createdAt: -1 })
+  .skip((pageNum - 1) * lim)
+  .limit(lim)
+  .populate('distributer', 'fullname phone distributerId')
+  .populate('transactionAddBy', 'fullname email')
+  .populate('orderId', 'orderId');   // 👈 only fetch the orderId field from Order
+
 
     return res.status(200).json(
 

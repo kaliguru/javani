@@ -29,6 +29,7 @@ mongoose
   app.use('/api/v1/order', require('./Routes/Order/Order'));
   app.use('/api/v1/paper-dispatch', require('./Routes/PaperDispatch/PaperDispatch'));
   app.use('/api/v1/transactions', require('./Routes/Transcations/Transcations'));
+  app.use('/api/v1/admin', require('./Routes/Admin/Admin'));
   // Start the server
 app.listen(port, () => {
   console.log(`🌐 Server is running on port ${port}`);
