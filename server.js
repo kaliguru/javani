@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const mongoose = require('mongoose');
 const path = require('path')
 const app = express();
@@ -7,6 +8,10 @@ const port = process.env.PORT || 8000;
 require('./config/firebase-config')
 // Middleware to parse JSON bodies
 app.use(express.json());
+// Enable CORS for all origins
+app.use(cors({ origin: '*' }));
+// Enable preflight for all routes
+app.options('*', cors());
 // ✅ Parse incoming JSON
 
 // Optional: Parse URL-encoded bodies (for forms)
