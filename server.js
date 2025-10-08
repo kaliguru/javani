@@ -9,9 +9,13 @@ require('./config/firebase-config')
 // Middleware to parse JSON bodies
 app.use(express.json());
 // Enable CORS for all origins
-app.use(cors({ origin: '*' }));
-// Enable preflight for all routes
-app.options('*', cors());
+const corsOptions = {
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};// Enable preflight for all routes
+app.use(cors(corsOptions));
 // ✅ Parse incoming JSON
 
 // Optional: Parse URL-encoded bodies (for forms)
