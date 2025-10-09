@@ -11,6 +11,18 @@ const adminAuth = require('../../Middleware/adminAuth');
 
 const { sendNotification } = require('../../services/notification');
 
+// Helper to extract a usable id string from various possible values
+function getId(val) {
+  if (!val) return null;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object') {
+    if (val._id) return String(val._id);
+    if (val.id) return String(val.id);
+    try { return String(val); } catch (e) { return null; }
+  }
+  return String(val);
+}
+
 async function generateOrderId() {
   const lastOrder = await Order.findOne({ orderId: { $regex: /^JVANI-\d+$/ } })
     .sort({ orderId: -1 })
@@ -247,11 +259,11 @@ router.patch('/:id/status', auth, async (req, res) => {
     // Notify distributer about status change (non-blocking)
     (async () => {
       try {
-        const result = await sendNotification({
+          const result = await sendNotification({
           title: 'Order Status Updated',
           body: `Order ${populated.orderId || populated.orderId} is now "${status}".`,
           userType: 'Distributer',
-          userId: String(populated.distributerId),
+            userId: getId(populated.distributerId),
           timeoutMs: 4000
         });
         if (!result.ok) console.warn('Notification not sent (distributer, status):', result.reason);
@@ -268,7 +280,7 @@ router.patch('/:id/status', auth, async (req, res) => {
             title: 'Order Status Updated',
             body: `Order ${populated.orderId || populated.orderId} status changed to "${status}".`,
             userType: 'User',
-            userId: String(populated.assignedTo._id),
+            userId: getId(populated.assignedTo),
             timeoutMs: 4000
           });
           if (!result.ok) console.warn('Notification not sent (user, status):', result.reason);
@@ -433,7 +445,7 @@ router.patch('/:id/payment-by', auth, async (req, res) => {
             title: 'Payment Received',
             body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
             userType: 'Distributer',
-            userId: String(updatedOrder.distributerId),
+            userId: getId(updatedOrder.distributerId),
             timeoutMs: 4000
           });
           if (!result.ok) console.warn('Notification not sent (distributer, payment):', result.reason);
@@ -450,7 +462,7 @@ router.patch('/:id/payment-by', auth, async (req, res) => {
               title: 'Payment Received',
               body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
               userType: 'User',
-              userId: String(updatedOrder.assignedTo),
+              userId: getId(updatedOrder.assignedTo),
               timeoutMs: 4000
             });
             if (!result.ok) console.warn('Notification not sent (user, payment):', result.reason);
@@ -499,7 +511,7 @@ session.endSession();
             title: 'Payment Received',
             body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
             userType: 'Distributer',
-            userId: String(updatedOrder.distributerId),
+            userId: getId(updatedOrder.distributerId),
             timeoutMs: 4000
           });
           if (!result.ok) console.warn('Notification not sent (distributer, payment):', result.reason);
@@ -516,7 +528,7 @@ session.endSession();
               title: 'Payment Received',
               body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
               userType: 'User',
-              userId: String(updatedOrder.assignedTo),
+              userId: getId(updatedOrder.assignedTo),
               timeoutMs: 4000
             });
             if (!result.ok) console.warn('Notification not sent (user, payment):', result.reason);
@@ -573,7 +585,7 @@ router.patch('/:id/reassign', auth, async (req, res) => {
           title: 'Order Reassigned to You',
           body: `Order ${order.orderId} has been assigned to you.`,
           userType: 'User',
-          userId: String(assignedTo),
+          userId: getId(assignedTo),
           timeoutMs: 4000
         });
         if (!result.ok) console.warn('Notification not sent (user, reassign):', result.reason);

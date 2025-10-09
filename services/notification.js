@@ -27,9 +27,28 @@ async function sendNotification({ title, body, userType, userId, timeoutMs = 500
   try {
     if (!userType || !userId) return { ok: false, reason: 'missing userType/userId' };
 
+    // Normalize userId: it may be an ObjectId, a Mongoose document, or a string.
+    let idToUse = userId;
+    if (typeof userId === 'object' && userId !== null) {
+      // Mongoose document or plain object: prefer _id
+      if (userId._id) idToUse = userId._id;
+      else if (userId.id) idToUse = userId.id;
+    }
+
+    // If it's an ObjectId instance, convert to hex string
+    if (typeof idToUse === 'object' && idToUse !== null && typeof idToUse.toHexString === 'function') {
+      idToUse = idToUse.toHexString();
+    }
+
+    // If it's a string containing a serialized object (e.g. "{ _id: new ObjectId('...') }") extract 24-char hex
+    if (typeof idToUse === 'string') {
+      const m = idToUse.match(/[0-9a-fA-F]{24}/);
+      if (m) idToUse = m[0];
+    }
+
     const doc = userType === 'User'
-      ? await User.findById(userId).lean()
-      : await Distributer.findById(userId).lean();
+      ? await User.findById(idToUse).lean()
+      : await Distributer.findById(idToUse).lean();
 
     if (!doc) return { ok: false, reason: 'user not found' };
     if (!doc.fcmToken) return { ok: false, reason: 'no fcmToken' };
