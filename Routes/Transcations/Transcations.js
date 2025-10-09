@@ -47,7 +47,7 @@ router.get('/my-transactions', auth, async (req, res) => {
       .sort({ createdAt: -1 })
       .skip((pageNum - 1) * lim)
       .limit(lim)
-      .populate('distributer', 'fullname phone distributerId')
+      .populate('distributer')
       .populate('transactionAddBy', 'fullname email')
       .populate('orderId', 'orderId'); // only fetch the orderId field from Order
 
