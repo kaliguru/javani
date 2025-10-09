@@ -7,6 +7,7 @@ const Distributer = require('../../Models/Distributer/Distributer');
 const User = require('../../Models/User/User'); // used for optional notifications to assigned user
 const Transaction = require('../../Models/Transcations/Transcations');
 const auth = require('../../Middleware/auth');
+const adminAuth = require('../../Middleware/adminAuth');
 
 const { sendNotification } = require('../../services/notification');
 
@@ -140,6 +141,24 @@ router.get('/by-distributer/:distributerId', auth, async (req, res) => {
     return res.status(200).json({ ok: true, count: orders.length, orders });
   } catch (err) {
     console.error('GET /by-distributer error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/* ============================
+   GET all orders (admin)
+   Admin-only route — populates assignedTo
+   ============================ */
+router.get('/', adminAuth, async (req, res) => {
+  try {
+    const orders = await Order.find()
+      .populate('assignedTo', 'fullname email phoneNumber')
+      .populate('distributerId', 'fullname phone distributerId')
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({ ok: true, count: orders.length, orders });
+  } catch (err) {
+    console.error('GET / (admin) error:', err);
     return res.status(500).json({ message: 'Server error' });
   }
 });
