@@ -3,11 +3,12 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
-
+const adminAuth = require('../../Middleware/adminAuth')
 const Distributer = require('../../Models/Distributer/Distributer');
 const User = require('../../Models/User/User'); // to validate addedBy
 const auth = require('../../Middleware/auth');
 const { sendSMS } = require('../../Utils/Sms');
+const adminAuth = require('../../Middleware/adminAuth');
 require('dotenv').config();
 
 function generateOTP() {
@@ -260,6 +261,99 @@ router.post('/logout', auth, async (req, res) => {
   } catch (err) {
     console.error('POST /logout error:', err);
     return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Add distributer by admin (no verification) - sets otpVerified/isVerified true
+// POST /api/v1/distributer/addbyadmin
+router.post('/addbyadmin', auth, async (req, res) => {
+  try {
+    const { phoneNumber, fullname, email, age, address, credit, whatsappAvailable = true } = req.body;
+    const addedBy = req.user.userId;
+
+    if (!phoneNumber || !fullname || !email || !age || !address || !credit) {
+      return res.status(400).json({ message: 'All fields are required' });
+    }
+
+    // Prevent duplicate phone/email
+    const exists = await Distributer.findOne({ $or: [{ phoneNumber }, { email }] });
+    if (exists) return res.status(409).json({ message: 'Phone number or email already exists' });
+
+    const distributerId = await generateDistributerId();
+
+    const distributer = new Distributer({
+      phoneNumber,
+      fullname,
+      email,
+      age,
+      address,
+      credit,
+      otp: null,
+      otpVerified: true,
+      isVerified: true,
+      addedBy,
+      distributerId,
+      whatsappAvailable,
+    });
+
+    await distributer.save();
+
+    return res.status(201).json({ ok: true, message: 'Distributer added by admin', distributer });
+  } catch (error) {
+    console.error('/addbyadmin error', error);
+    if (error.code === 11000) return res.status(409).json({ message: 'Duplicate entry' });
+    return res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+});
+
+// GET all distributers
+// GET /api/v1/distributer/
+router.get('/', adminAuth, async (req, res) => {
+  try {
+    const distributers = await Distributer.find().select('-otp -__v');
+    return res.status(200).json({ ok: true, distributers });
+  } catch (error) {
+    return res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+});
+
+// PUT update distributer by id
+// PUT /api/v1/distributer/:id
+router.put('/:id', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = { ...req.body };
+
+    // Prevent updating protected fields
+    delete updates.distributerId;
+    delete updates.addedBy;
+    delete updates.createdAt;
+    delete updates.otp;
+    delete updates.otpVerified;
+    delete updates.__v;
+
+    const updated = await Distributer.findByIdAndUpdate(id, { $set: updates }, { new: true }).select('-otp -__v');
+    if (!updated) return res.status(404).json({ message: 'Distributer not found' });
+
+    return res.status(200).json({ ok: true, distributer: updated });
+  } catch (error) {
+    return res.status(500).json({ message: 'Server Error', error: error.message });
+  }
+});
+
+// DELETE distributer by id
+// DELETE /api/v1/distributer/:id
+router.delete('/:id', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await Distributer.findByIdAndDelete(id).select('-otp -__v');
+    if (!deleted) return res.status(404).json({ message: 'Distributer not found' });
+
+    // TODO: add cascading cleanup if there are related resources to remove
+
+    return res.status(200).json({ ok: true, message: 'Distributer deleted', distributer: deleted });
+  } catch (error) {
+    return res.status(500).json({ message: 'Server Error', error: error.message });
   }
 });
 module.exports = router;

@@ -50,6 +50,10 @@ const distributerSchema = new mongoose.Schema({
     fcmToken: {
         type: String,
     },
+    balance: {
+        type: Number,
+        default: 0,
+    },
     whatsappAvailable: {
         type: Boolean,
         default: true,

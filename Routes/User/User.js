@@ -33,7 +33,7 @@ async function generateEmployeeId() {
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
     try {
-        const { phoneNumber, fullname, age, address } = req.body;
+        const { phoneNumber, fullname, age,      } = req.body;
 
         // Basic validation
         if (!phoneNumber || !fullname || !age || !address) {
