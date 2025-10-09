@@ -3,7 +3,6 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
-const adminAuth = require('../../Middleware/adminAuth')
 const Distributer = require('../../Models/Distributer/Distributer');
 const User = require('../../Models/User/User'); // to validate addedBy
 const auth = require('../../Middleware/auth');
