@@ -265,13 +265,12 @@ router.post('/logout', auth, async (req, res) => {
 
 // Add distributer by admin (no verification) - sets otpVerified/isVerified true
 // POST /api/v1/distributer/addbyadmin
-router.post('/addbyadmin', auth, async (req, res) => {
+router.post('/addbyadmin', adminAuth, async (req, res) => {
   try {
-    const { phoneNumber, fullname, email, age, address, credit, whatsappAvailable = true } = req.body;
-    const addedBy = req.user.userId;
+    const { phoneNumber, fullname, email, age, address, credit, whatsappAvailable = true, addedBy } = req.body;
 
-    if (!phoneNumber || !fullname || !email || !age || !address || !credit) {
-      return res.status(400).json({ message: 'All fields are required' });
+    if (!phoneNumber || !fullname || !email || !age || !address || !credit || !addedBy) {
+      return res.status(400).json({ message: 'All fields are required, including addedBy' });
     }
 
     // Prevent duplicate phone/email
