@@ -138,6 +138,93 @@ router.post('/', auth, async (req, res) => {
 });
 
 /* ============================
+   CREATE ORDER (assignedTo provided in body or fallback to distributer.addedBy)
+   POST /create-by
+   ============================ */
+router.post('/create-by', auth, async (req, res) => {
+  try {
+    console.log('Creating order via create-by:', req.body);
+
+    if (!req.user || !req.user.distributerId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const { qty, unit, note, total, paymentMode, assignedTo } = req.body;
+    if (!qty || !unit || !total || !paymentMode) {
+      return res.status(400).json({ message: 'Missing required fields' });
+    }
+
+    // Fetch distributer
+    const distributer = await Distributer.findById(req.user.distributerId);
+    if (!distributer) return res.status(404).json({ message: 'Distributer not found' });
+
+    // Determine assignedTo: body value if provided and valid ObjectId, otherwise distributer.addedBy
+    let finalAssignedTo = distributer.addedBy || null;
+    if (assignedTo && mongoose.Types.ObjectId.isValid(assignedTo)) {
+      finalAssignedTo = assignedTo;
+    }
+
+    // Generate orderId
+    const orderId = await generateOrderId();
+
+    // Create order
+    const newOrder = new Order({
+      orderId,
+      distributerId: req.user.distributerId,
+      qty,
+      unit,
+      note,
+      total,
+      paymentMode,
+      cod: String(paymentMode).toLowerCase() === 'cod',
+      assignedTo: finalAssignedTo,
+      status: 'processing',
+    });
+
+    const savedOrder = await newOrder.save();
+
+    // Notify distributer (non-blocking)
+    (async () => {
+      try {
+        const result = await sendNotification({
+          title: 'New Order Placed',
+          body: `Order ${orderId} created for you. Total ₹${total}.`,
+          userType: 'Distributer',
+          userId: String(savedOrder.distributerId),
+          timeoutMs: 4000
+        });
+        if (!result.ok) console.warn('Notification not sent (distributer, create-by):', result.reason);
+      } catch (e) {
+        console.error('Notification error (distributer, create-by):', e.message || e);
+      }
+    })();
+
+    // Notify assigned user (if present)
+    if (finalAssignedTo) {
+      (async () => {
+        try {
+          const result = await sendNotification({
+            title: 'New Order Assigned',
+            body: `You have been assigned order ${orderId} (₹${total}).`,
+            userType: 'User',
+            userId: String(finalAssignedTo),
+            timeoutMs: 4000
+          });
+          if (!result.ok) console.warn('Notification not sent (user, create-by):', result.reason);
+        } catch (e) {
+          console.error('Notification error (user, create-by):', e.message || e);
+        }
+      })();
+    }
+
+    return res.status(201).json({ message: 'Order placed and assigned successfully', order: savedOrder });
+  } catch (err) {
+    console.error('Error creating order (create-by):', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
+/* ============================
    GET by distributer
    ============================ */
 router.get('/by-distributer/:distributerId', auth, async (req, res) => {
