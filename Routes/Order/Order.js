@@ -375,6 +375,7 @@ router.patch('/:id/payment-by', auth, async (req, res) => {
   session.startTransaction();
 
   try {
+    console.log('PATCH /:id/payment-by called with body:', req.body);
     const { id } = req.params;
     let { paid, paymentMode, transactionId, transactionPaymentMode, transactionAddBy } = req.body;
 
