@@ -145,17 +145,13 @@ router.post('/create-by', adminAuth, async (req, res) => {
   try {
     console.log('Creating order via create-by:', req.body);
 
-    // if (!req.user || !req.user.distributerId) {
-    //   return res.status(401).json({ message: 'Unauthorized' });
-    // }
-
-    const { qty, unit, note, total, paymentMode, assignedTo } = req.body;
-    if (!qty || !unit || !total || !paymentMode) {
+    const { distributerId, qty, unit, note, total, paymentMode, assignedTo } = req.body;
+    if (!distributerId || !qty || !unit || !total || !paymentMode) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
     // Fetch distributer
-    const distributer = await Distributer.findById(req.user.distributerId);
+    const distributer = await Distributer.findById(distributerId);
     if (!distributer) return res.status(404).json({ message: 'Distributer not found' });
 
     // Determine assignedTo: body value if provided and valid ObjectId, otherwise distributer.addedBy
@@ -170,7 +166,7 @@ router.post('/create-by', adminAuth, async (req, res) => {
     // Create order
     const newOrder = new Order({
       orderId,
-      distributerId: req.user.distributerId,
+      distributerId,
       qty,
       unit,
       note,
