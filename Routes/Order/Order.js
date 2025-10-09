@@ -141,13 +141,13 @@ router.post('/', auth, async (req, res) => {
    CREATE ORDER (assignedTo provided in body or fallback to distributer.addedBy)
    POST /create-by
    ============================ */
-router.post('/create-by', auth, async (req, res) => {
+router.post('/create-by', adminAuth, async (req, res) => {
   try {
     console.log('Creating order via create-by:', req.body);
 
-    if (!req.user || !req.user.distributerId) {
-      return res.status(401).json({ message: 'Unauthorized' });
-    }
+    // if (!req.user || !req.user.distributerId) {
+    //   return res.status(401).json({ message: 'Unauthorized' });
+    // }
 
     const { qty, unit, note, total, paymentMode, assignedTo } = req.body;
     if (!qty || !unit || !total || !paymentMode) {
