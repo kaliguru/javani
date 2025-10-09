@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 
 const Transaction = require('../../Models/Transcations/Transcations');
 const auth = require('../../Middleware/auth');
+const adminAuth = require('../../Middleware/adminAuth');
 
 // validate ObjectId
 function isValidId(id) {
@@ -103,4 +104,35 @@ router.get('/my-summary', auth, async (req, res) => {
   }
 });
 
+/**
+ * GET /
+ * Admin: list all transactions (paginated) populated with distributer, transactionAddBy and orderId
+ */
+router.get('/', adminAuth, async (req, res) => {
+  try {
+    const { page = 1, limit = 50, type } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const lim = Math.max(1, Math.min(500, parseInt(limit, 10)));
+
+    const filters = {};
+    if (type && ['credit', 'debit'].includes(String(type).toLowerCase())) filters.type = String(type).toLowerCase();
+
+    const total = await Transaction.countDocuments(filters);
+
+    const transactions = await Transaction.find(filters)
+      .sort({ createdAt: -1 })
+      .skip((pageNum - 1) * lim)
+      .limit(lim)
+      .populate('distributer', 'fullname phone distributerId')
+      .populate('transactionAddBy', 'fullname email')
+      .populate('orderId', 'orderId');
+
+    return res.status(200).json({ ok: true, total, page: pageNum, limit: lim, transactions });
+  } catch (err) {
+    console.error('GET / (admin) transactions error:', err);
+    return res.status(500).json({ ok: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;
+
