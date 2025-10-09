@@ -348,6 +348,145 @@ router.patch('/:id/payment', auth, async (req, res) => {
   paymentMode: txnPaymentMode,
 });
 
+/* ============================
+   PATCH payment (with transactionAddBy in body)
+   Similar to /:id/payment but allows the caller to supply `transactionAddBy` in request body.
+   Body params:
+     - paid: boolean (required to mark payment)
+     - paymentMode: string (optional)
+     - transactionId: string (optional)
+     - transactionPaymentMode: string (optional)
+     - transactionAddBy: string (optional) -- will be used as transaction.transactionAddBy
+   ============================ */
+router.patch('/:id/payment-by', auth, async (req, res) => {
+  const session = await Order.startSession();
+  session.startTransaction();
+
+  try {
+    const { id } = req.params;
+    let { paid, paymentMode, transactionId, transactionPaymentMode, transactionAddBy } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Invalid order id' });
+    }
+
+    if (paymentMode && !['cod', 'onlinepayment', 'cash', 'upi', 'bank', 'cheque', 'other'].includes(String(paymentMode).toLowerCase())) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ message: 'Invalid paymentMode' });
+    }
+
+    const order = await Order.findById(id).session(session);
+    if (!order) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // Prepare update object
+    const update = {};
+    if (typeof paid === 'boolean') update.paid = paid;
+    if (paymentMode) update.paymentMode = paymentMode;
+
+    // generate random transactionId if not provided
+    if (paid && !transactionId) {
+      transactionId = generateTransactionId(transactionPaymentMode || paymentMode);
+    }
+    if (transactionId) update.transactionId = transactionId;
+    if (paid) update.paidAt = new Date();
+
+    const shouldCreateCreditTxn = (paid === true) && !order.paid;
+
+    const updatedOrder = await Order.findByIdAndUpdate(id, { $set: update }, { new: true, session });
+
+    let createdTransaction = null;
+    if (shouldCreateCreditTxn) {
+      let pm = (transactionPaymentMode || paymentMode || 'other');
+      let txnPaymentMode = String(pm).toLowerCase();
+
+      if (txnPaymentMode === 'cod') txnPaymentMode = 'cash';
+      else if (txnPaymentMode === 'onlinepayment') txnPaymentMode = 'other';
+
+      // Use transactionAddBy from body if provided, otherwise fall back to user or assignedTo
+      const txnAddBy = transactionAddBy || req.user?.userId || updatedOrder.assignedTo || null;
+
+      const transactionDoc = new Transaction({
+        distributer: updatedOrder.distributerId,
+        transactionAddBy: txnAddBy,
+        orderId: updatedOrder._id,
+        type: 'credit',
+        amount: updatedOrder.total,
+        paymentMode: txnPaymentMode,
+      });
+
+      createdTransaction = await transactionDoc.save({ session });
+
+      // commit before reload
+      await session.commitTransaction();
+      session.endSession();
+
+      (async () => {
+        try {
+          const result = await sendNotification({
+            title: 'Payment Received',
+            body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
+            userType: 'Distributer',
+            userId: String(updatedOrder.distributerId),
+            timeoutMs: 4000
+          });
+          if (!result.ok) console.warn('Notification not sent (distributer, payment):', result.reason);
+        } catch (e) {
+          console.error('Notification error (distributer, payment):', e.message || e);
+        }
+      })();
+
+      // Notify assigned user about payment (non-blocking)
+      if (updatedOrder.assignedTo) {
+        (async () => {
+          try {
+            const result = await sendNotification({
+              title: 'Payment Received',
+              body: `Payment of ₹${updatedOrder.total} received for ${updatedOrder.orderId}.`,
+              userType: 'User',
+              userId: String(updatedOrder.assignedTo),
+              timeoutMs: 4000
+            });
+            if (!result.ok) console.warn('Notification not sent (user, payment):', result.reason);
+          } catch (e) {
+            console.error('Notification error (user, payment):', e.message || e);
+          }
+        })();
+      }
+    }
+
+    // If we haven't committed earlier, commit now
+    try {
+      await session.commitTransaction();
+    } catch (e) {
+      // ignore if already committed
+    }
+    session.endSession();
+
+    const finalOrder = await Order.findById(id)
+      .populate('distributerId', 'fullname phone distributerId')
+      .populate('assignedTo', 'fullname email');
+
+    return res.status(200).json({
+      ok: true,
+      message: 'Payment updated',
+      order: finalOrder,
+      transaction: createdTransaction,
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error('PATCH /:id/payment-by error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+});
+
 createdTransaction = await transactionDoc.save({ session });
 
 // commit before reload
