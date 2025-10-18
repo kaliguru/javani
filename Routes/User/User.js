@@ -306,16 +306,16 @@ router.put('/:id', auth, async (req, res) => {
 
 // DELETE a user by id
 // DELETE /api/v1/user/:id
-router.delete('/:id', auth, async (req, res) => {
-    try {
-        const { id } = req.params;
-        const deleted = await User.findByIdAndDelete(id).select('-otp -__v');
-        if (!deleted) return res.status(404).json({ message: 'User not found' });
+// router.delete('/:id', auth, async (req, res) => {
+//     try {
+//         const { id } = req.params;
+//         const deleted = await User.findByIdAndDelete(id).select('-otp -__v');
+//         if (!deleted) return res.status(404).json({ message: 'User not found' });
 
-        return res.status(200).json({ ok: true, message: 'User deleted', user: deleted });
-    } catch (error) {
-        return res.status(500).json({ message: 'Server Error', error: error.message });
-    }
-});
+//         return res.status(200).json({ ok: true, message: 'User deleted', user: deleted });
+//     } catch (error) {
+//         return res.status(500).json({ message: 'Server Error', error: error.message });
+//     }
+// });
 module.exports = router;
 
