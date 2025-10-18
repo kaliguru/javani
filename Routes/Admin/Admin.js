@@ -88,7 +88,31 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// Get all admins (admin access required)
+router.get('/', adminAuth, async (req, res) => {
+  try {
+    const admins = await Admin.find()
+      .select('-password')
+      .sort({ createdAt: -1 });
 
+    return res.status(200).json({
+      ok: true,
+      admins: admins.map(admin => ({
+        id: admin._id,
+        email: admin.email,
+        fullname: admin.fullname,
+        isSuperAdmin: admin.isSuperAdmin,
+        phone: admin.phone,
+        lastLoggedin: admin.lastLoggedin,
+        createdAt: admin.createdAt,
+        updatedAt: admin.updatedAt
+      }))
+    });
+  } catch (err) {
+    console.error('Error fetching all admins:', err);
+    return res.status(500).json({ ok: false, message: 'Server error' });
+  }
+});
 router.get('/me', adminAuth, async (req, res) => {
   try {
     if (!req.admin) {
